@@ -117,3 +117,13 @@ Security middleware (`framework/middleware`):
 - rate limiting is in-memory only (single process)
 - config file format currently supports JSON (YAML/TOML can be added later)
 
+## ORM Integration (Extension Implemented)
+
+In addition to phases 6-12, the project now includes ORM integration:
+- `framework/orm` (GORM-based)
+- built-in dialectors: `sqlite`, `postgres`, `mysql`, `sqlserver`
+- custom dialector registration for other databases
+- middleware injection (`orm.Middleware(db)`) + context retrieval (`orm.FromContext`)
+
+See:
+- `docs/orm.md`

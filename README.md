@@ -18,6 +18,7 @@ Implemented foundations:
 - Centralized error handling (`OnError`, `OnStatus`, `HTTPError`)
 - Templates and static serving (`LoadTemplates`, `Render`, `Static`)
 - Config package (`framework/config`) with file/env loaders
+- ORM integration (`framework/orm`) with GORM + custom dialector registry
 - Blueprints/modules (`framework/blueprint`)
 - CLI commands (`penda new`, `penda run`, `penda routes`, `penda doctor`)
 - Testing toolkit (`framework/testing`)
@@ -57,6 +58,7 @@ go run ./cmd/penda new myapp
 
 - First part (foundation + core HTTP + routing + context): `docs/premiere-partie.md`
 - Advanced phases (error handling, templates, config, blueprints, CLI, observability): `docs/advanced-phases.md`
+- ORM integration (multi-SGBD + custom dialectors): `docs/orm.md`
 - Full implementation plan: `ROADMAP_MICRO_FRAMEWORK_GO.md`
 
 ## Installation
