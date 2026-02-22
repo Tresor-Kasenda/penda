@@ -3,6 +3,8 @@ module penda
 go 1.22.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
+	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0

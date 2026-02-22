@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <h1>{{.Title}}</h1>
+      <p>Server-rendered HTML with Penda.</p>
+      <ul>
+        {{range .Items}}
+        <li>{{.}}</li>
+        {{end}}
+      </ul>
+      <p><a href="/ping">API ping</a></p>
+    </main>
+  </body>
+</html>

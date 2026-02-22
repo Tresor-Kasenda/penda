@@ -1,6 +1,8 @@
 package blueprint
 
 import (
+	"fmt"
+	"html/template"
 	"net/http"
 
 	fwapp "penda/framework/app"
@@ -14,21 +16,31 @@ type routeDef struct {
 	middlewares []fwapp.Middleware
 }
 
+type staticDef struct {
+	prefix      string
+	dir         string
+	middlewares []fwapp.Middleware
+}
+
 // Blueprint is a mountable module containing routes and middleware.
 type Blueprint struct {
-	name        string
-	prefix      string
-	middlewares []fwapp.Middleware
-	routes      []routeDef
+	name             string
+	prefix           string
+	middlewares      []fwapp.Middleware
+	routes           []routeDef
+	templatePatterns []string
+	templateFuncs    template.FuncMap
+	staticMounts     []staticDef
 }
 
 // New creates a new blueprint with a prefix.
 func New(name, prefix string, middlewares ...fwapp.Middleware) *Blueprint {
 	return &Blueprint{
-		name:        name,
-		prefix:      prefix,
-		middlewares: append([]fwapp.Middleware(nil), middlewares...),
-		routes:      make([]routeDef, 0),
+		name:          name,
+		prefix:        prefix,
+		middlewares:   append([]fwapp.Middleware(nil), middlewares...),
+		routes:        make([]routeDef, 0),
+		templateFuncs: template.FuncMap{},
 	}
 }
 
@@ -40,6 +52,33 @@ func (b *Blueprint) Name() string {
 // Use adds middleware to the blueprint.
 func (b *Blueprint) Use(middlewares ...fwapp.Middleware) {
 	b.middlewares = append(b.middlewares, middlewares...)
+}
+
+// SetTemplateFuncs registers template functions that should be available when this
+// blueprint loads local templates.
+func (b *Blueprint) SetTemplateFuncs(funcs template.FuncMap) {
+	for key, value := range funcs {
+		b.templateFuncs[key] = value
+	}
+}
+
+// LoadTemplates registers local template glob patterns to be merged at mount time.
+func (b *Blueprint) LoadTemplates(patterns ...string) {
+	b.templatePatterns = append(b.templatePatterns, patterns...)
+}
+
+// Static registers a local static directory under the blueprint prefix.
+func (b *Blueprint) Static(prefix, dir string, middlewares ...fwapp.Middleware) {
+	b.StaticWith(prefix, dir, middlewares...)
+}
+
+// StaticWith registers a local static directory with route-level middleware.
+func (b *Blueprint) StaticWith(prefix, dir string, middlewares ...fwapp.Middleware) {
+	b.staticMounts = append(b.staticMounts, staticDef{
+		prefix:      prefix,
+		dir:         dir,
+		middlewares: append([]fwapp.Middleware(nil), middlewares...),
+	})
 }
 
 // Handle registers a route in the blueprint.
@@ -79,7 +118,19 @@ func (b *Blueprint) Delete(path string, handler fwapp.Handler, middlewares ...fw
 
 // Mount mounts blueprint routes into app.
 func (b *Blueprint) Mount(a *fwapp.App) {
+	if len(b.templateFuncs) > 0 {
+		a.SetTemplateFuncs(b.templateFuncs)
+	}
+	if len(b.templatePatterns) > 0 {
+		if err := a.AppendTemplates(b.templatePatterns...); err != nil {
+			panic(fmt.Sprintf("mount blueprint %q templates: %v", b.name, err))
+		}
+	}
+
 	group := a.Group(b.prefix, b.middlewares...)
+	for _, mount := range b.staticMounts {
+		group.StaticWith(mount.prefix, mount.dir, mount.middlewares...)
+	}
 	for _, route := range b.routes {
 		group.HandleWith(route.method, route.path, route.handler, route.middlewares...)
 	}

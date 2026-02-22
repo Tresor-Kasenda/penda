@@ -47,13 +47,17 @@ server.Static("/assets", "./public")
 
 Implemented in `framework/config`:
 - `config.Default()`
-- `config.LoadFile(path)` (JSON)
+- `config.LoadFile(path)` (JSON/YAML/TOML)
 - `config.LoadEnv(prefix)`
+- `config.KnownProfiles()`
+- `config.ProfileDefaults(profile)`
+- `config.Resolve(config.ResolveOptions{...})` with precedence `defaults < profile < file < env`
 - `config.Merge(base, overrides...)`
 
 Integrated in `App`:
 - `app.Config()`
 - `app.SetConfig(cfg)`
+- `app.LoadConfig(config.ResolveOptions{...})`
 - `app.LoadConfigFromFile(path)`
 - `app.LoadConfigFromEnv(prefix)`
 
@@ -62,6 +66,8 @@ Integrated in `App`:
 Implemented in `framework/blueprint`:
 - `blueprint.New(name, prefix, middleware...)`
 - route registration methods (`Get`, `Post`, `Put`, `Patch`, `Delete`)
+- `bp.LoadTemplates(patterns...)` (merged into app templates at mount time)
+- `bp.Static(prefix, dir)` / `bp.StaticWith(...)`
 - `app.Register(bp)`
 
 Example:
@@ -95,7 +101,9 @@ Implemented in `framework/testing`:
 - `client.Get(path)`
 - `client.PostJSON(path, payload)`
 - `client.PostForm(path, values)`
-- helpers: `AssertStatus`, `AssertHeaderContains`
+- `client.PostMultipart(path, fields, files...)`
+- `client.DoWithCookies(req, cookies...)`
+- helpers: `AssertStatus`, `AssertHeaderContains`, `AssertBodyContains`, `AssertJSONEqual`, `AssertCookieValue`
 
 ## Phase 12: Observability and Security
 
@@ -115,7 +123,6 @@ Security middleware (`framework/middleware`):
 - template auto-reload in dev mode is not implemented yet
 - no OpenTelemetry tracing integration yet
 - rate limiting is in-memory only (single process)
-- config file format currently supports JSON (YAML/TOML can be added later)
 
 ## ORM Integration (Extension Implemented)
 

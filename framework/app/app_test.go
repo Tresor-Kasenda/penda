@@ -371,6 +371,38 @@ func TestSetConfigUpdatesBodyLimit(t *testing.T) {
 	}
 }
 
+func TestLoadConfigResolveOptions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("" +
+		"profile: prod\n" +
+		"max_body_bytes: 0\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("PENDA_ADDRESS", ":7070")
+
+	server := New()
+	if err := server.LoadConfig(fwconfig.ResolveOptions{
+		FilePath:  path,
+		EnvPrefix: "PENDA",
+	}); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	cfg := server.Config()
+	if cfg.Profile != "prod" {
+		t.Fatalf("expected profile %q, got %q", "prod", cfg.Profile)
+	}
+	if cfg.Address != ":7070" {
+		t.Fatalf("expected address %q, got %q", ":7070", cfg.Address)
+	}
+	if cfg.MaxBodyBytes != 0 {
+		t.Fatalf("expected max body bytes %d, got %d", 0, cfg.MaxBodyBytes)
+	}
+}
+
 func BenchmarkServeHTTPExactRoute(b *testing.B) {
 	server := New()
 	server.Get("/health", func(c *fwctx.Context) error {

@@ -17,11 +17,11 @@ Implemented foundations:
 - Header/cookie helpers
 - Centralized error handling (`OnError`, `OnStatus`, `HTTPError`)
 - Templates and static serving (`LoadTemplates`, `Render`, `Static`)
-- Config package (`framework/config`) with file/env loaders
+- Config package (`framework/config`) with profiles + JSON/YAML/TOML file/env resolution
 - ORM integration (`framework/orm`) with GORM + custom dialector registry
-- Blueprints/modules (`framework/blueprint`)
+- Blueprints/modules (`framework/blueprint`) with local templates/static mounts
 - CLI commands (`penda new`, `penda run`, `penda routes`, `penda doctor`)
-- Testing toolkit (`framework/testing`)
+- Testing toolkit (`framework/testing`) with JSON/cookie assertions and multipart helpers
 - Observability package (`/metrics`, health/readiness handlers)
 
 ## Quickstart
@@ -54,12 +54,26 @@ go run ./cmd/penda doctor
 go run ./cmd/penda new myapp
 ```
 
+## Official Examples
+
+- `examples/hello`
+- `examples/rest-api` (ORM CRUD + tests)
+- `examples/web-app` (templates + static)
+
+See: `docs/examples.md`
+
 ## Documentation
 
+- Documentation index (recommended start): `docs/index.md`
 - First part (foundation + core HTTP + routing + context): `docs/premiere-partie.md`
 - Advanced phases (error handling, templates, config, blueprints, CLI, observability): `docs/advanced-phases.md`
 - ORM integration (multi-SGBD + custom dialectors): `docs/orm.md`
+- Official examples guide: `docs/examples.md`
+- Full API reference (all packages): `docs/api-reference.md`
 - Full implementation plan: `ROADMAP_MICRO_FRAMEWORK_GO.md`
+- Release process: `RELEASE.md`
+- Migration guide: `MIGRATION.md`
+- Changelog: `CHANGELOG.md`
 
 ## Installation
 
