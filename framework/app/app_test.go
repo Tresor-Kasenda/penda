@@ -310,6 +310,47 @@ func TestTemplateRendering(t *testing.T) {
 	}
 }
 
+func TestTemplateAutoReload(t *testing.T) {
+	dir := t.TempDir()
+	templatePath := filepath.Join(dir, "index.tmpl")
+	if err := os.WriteFile(templatePath, []byte("Version A"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := New()
+	server.SetTemplateAutoReload(true)
+	if err := server.LoadTemplates(filepath.Join(dir, "*.tmpl")); err != nil {
+		t.Fatalf("load templates: %v", err)
+	}
+	server.Get("/page", func(c *fwctx.Context) error {
+		return c.Render("index.tmpl", nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/page", nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "Version A" {
+		t.Fatalf("unexpected body: %q", rr.Body.String())
+	}
+
+	if err := os.WriteFile(templatePath, []byte("Version B"), 0o644); err != nil {
+		t.Fatalf("rewrite template: %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/page", nil)
+	rr2 := httptest.NewRecorder()
+	server.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr2.Code)
+	}
+	if strings.TrimSpace(rr2.Body.String()) != "Version B" {
+		t.Fatalf("expected auto-reloaded template body %q, got %q", "Version B", rr2.Body.String())
+	}
+}
+
 func TestStaticServing(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "app.css")
@@ -332,6 +373,37 @@ func TestStaticServing(t *testing.T) {
 	}
 	if rr.Header().Get("Cache-Control") == "" {
 		t.Fatal("expected Cache-Control header")
+	}
+}
+
+func TestStaticServingSupportsETag304(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "app.css")
+	if err := os.WriteFile(filePath, []byte("body{color:black;}"), 0o644); err != nil {
+		t.Fatalf("write static file: %v", err)
+	}
+
+	server := New()
+	server.Static("/assets", dir)
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.css", nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	etag := rr.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("expected ETag header")
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/assets/app.css", nil)
+	req2.Header.Set("If-None-Match", etag)
+	rr2 := httptest.NewRecorder()
+	server.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusNotModified {
+		t.Fatalf("expected status %d, got %d", http.StatusNotModified, rr2.Code)
 	}
 }
 

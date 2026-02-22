@@ -190,6 +190,37 @@ func TestCSRFMiddleware(t *testing.T) {
 	}
 }
 
+func TestCSRFMiddlewareIssuesTokenOnSafeMethod(t *testing.T) {
+	server := fwapp.New()
+	server.Use(CSRF(CSRFConfig{}))
+	server.Get("/form", func(c *fwctx.Context) error {
+		token := CSRFToken(c)
+		if strings.TrimSpace(token) == "" {
+			t.Fatal("expected csrf token in context")
+		}
+		return c.Text(http.StatusOK, token)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/form", nil)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	cookies := rr.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected csrf cookie to be set")
+	}
+	if strings.TrimSpace(cookies[0].Value) == "" {
+		t.Fatal("expected csrf cookie value")
+	}
+	if strings.TrimSpace(rr.Body.String()) != cookies[0].Value {
+		t.Fatalf("expected body token to match cookie token, got body=%q cookie=%q", rr.Body.String(), cookies[0].Value)
+	}
+}
+
 func TestCSRFMiddlewareRejectsInvalidToken(t *testing.T) {
 	server := fwapp.New()
 	server.Use(CSRF(CSRFConfig{}))
@@ -205,5 +236,40 @@ func TestCSRFMiddlewareRejectsInvalidToken(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+	}
+}
+
+func TestCSRFMiddlewareRotateOnUnsafe(t *testing.T) {
+	server := fwapp.New()
+	server.Use(CSRF(CSRFConfig{RotateOnUnsafe: true}))
+	server.Post("/submit", func(c *fwctx.Context) error {
+		return c.Text(http.StatusOK, "ok")
+	})
+
+	initialGet := httptest.NewRequest(http.MethodGet, "/missing-safe-route", nil)
+	initialRR := httptest.NewRecorder()
+	// Route 404 still passes through global middleware and should issue a token.
+	server.ServeHTTP(initialRR, initialGet)
+	if len(initialRR.Result().Cookies()) == 0 {
+		t.Fatal("expected csrf cookie issued on safe request")
+	}
+	initialCookie := initialRR.Result().Cookies()[0]
+
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	req.Header.Set("X-CSRF-Token", initialCookie.Value)
+	req.AddCookie(initialCookie)
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	nextCookies := rr.Result().Cookies()
+	if len(nextCookies) == 0 {
+		t.Fatal("expected rotated csrf cookie")
+	}
+	if nextCookies[0].Value == initialCookie.Value {
+		t.Fatal("expected rotated csrf token to differ from original")
 	}
 }

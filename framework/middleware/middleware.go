@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -49,10 +50,21 @@ type RateLimitConfig struct {
 
 // CSRFConfig configures CSRF token validation.
 type CSRFConfig struct {
-	CookieName string
-	HeaderName string
-	FormField  string
+	CookieName     string
+	CookiePath     string
+	CookieDomain   string
+	CookieSecure   bool
+	CookieHTTPOnly bool
+	CookieSameSite http.SameSite
+	CookieMaxAge   int
+	HeaderName     string
+	FormField      string
+	ContextKey     string
+	TokenBytes     int
+	RotateOnUnsafe bool
 }
+
+const defaultCSRFContextKey = "csrf_token"
 
 // Recovery catches panics and turns them into a 500 error.
 func Recovery() fwapp.Middleware {
@@ -249,27 +261,54 @@ func CSRF(config CSRFConfig) fwapp.Middleware {
 
 	return func(next fwapp.Handler) fwapp.Handler {
 		return func(c *fwctx.Context) error {
+			cookieToken, _ := currentCSRFCookieToken(c, normalized.CookieName)
+			if cookieToken == "" {
+				token, err := generateToken(normalized.TokenBytes)
+				if err != nil {
+					return fwctx.NewHTTPError(http.StatusInternalServerError, "failed to generate CSRF token", err)
+				}
+				cookieToken = token
+				writeCSRFCookie(c, normalized, token)
+			}
+			c.Set(normalized.ContextKey, cookieToken)
+
 			switch c.Request.Method {
 			case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
 				return next(c)
-			}
-
-			cookie, err := c.Cookie(normalized.CookieName)
-			if err != nil {
-				return fwctx.NewHTTPError(http.StatusForbidden, "missing CSRF cookie", err)
 			}
 
 			token := strings.TrimSpace(c.Header(normalized.HeaderName))
 			if token == "" {
 				token = strings.TrimSpace(c.FormValue(normalized.FormField))
 			}
-			if token == "" || token != cookie.Value {
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(cookieToken)) != 1 {
 				return fwctx.NewHTTPError(http.StatusForbidden, "invalid CSRF token", nil)
 			}
 
+			if normalized.RotateOnUnsafe {
+				nextToken, genErr := generateToken(normalized.TokenBytes)
+				if genErr != nil {
+					return fwctx.NewHTTPError(http.StatusInternalServerError, "failed to rotate CSRF token", genErr)
+				}
+				writeCSRFCookie(c, normalized, nextToken)
+				c.Set(normalized.ContextKey, nextToken)
+			}
 			return next(c)
 		}
 	}
+}
+
+// CSRFToken returns the CSRF token stored in context locals by the CSRF middleware.
+func CSRFToken(c *fwctx.Context) string {
+	if c == nil {
+		return ""
+	}
+	value, ok := c.Get(defaultCSRFContextKey)
+	if !ok {
+		return ""
+	}
+	token, _ := value.(string)
+	return token
 }
 
 func normalizeCORSConfig(config CORSConfig) CORSConfig {
@@ -333,11 +372,20 @@ func normalizeCSRFConfig(config CSRFConfig) CSRFConfig {
 	if strings.TrimSpace(config.CookieName) == "" {
 		config.CookieName = "csrf_token"
 	}
+	if strings.TrimSpace(config.CookiePath) == "" {
+		config.CookiePath = "/"
+	}
 	if strings.TrimSpace(config.HeaderName) == "" {
 		config.HeaderName = "X-CSRF-Token"
 	}
 	if strings.TrimSpace(config.FormField) == "" {
 		config.FormField = "_csrf"
+	}
+	if strings.TrimSpace(config.ContextKey) == "" {
+		config.ContextKey = defaultCSRFContextKey
+	}
+	if config.TokenBytes <= 0 {
+		config.TokenBytes = 32
 	}
 	return config
 }
@@ -356,4 +404,36 @@ func newRequestID() string {
 
 	counter := atomic.AddUint64(&requestIDCounter, 1)
 	return strconv.FormatUint(counter, 10)
+}
+
+func currentCSRFCookieToken(c *fwctx.Context, name string) (string, bool) {
+	cookie, err := c.Cookie(name)
+	if err != nil || cookie == nil || strings.TrimSpace(cookie.Value) == "" {
+		return "", false
+	}
+	return cookie.Value, true
+}
+
+func writeCSRFCookie(c *fwctx.Context, config CSRFConfig, token string) {
+	c.SetCookie(&http.Cookie{
+		Name:     config.CookieName,
+		Value:    token,
+		Path:     config.CookiePath,
+		Domain:   config.CookieDomain,
+		Secure:   config.CookieSecure,
+		HttpOnly: config.CookieHTTPOnly,
+		SameSite: config.CookieSameSite,
+		MaxAge:   config.CookieMaxAge,
+	})
+}
+
+func generateToken(byteLen int) (string, error) {
+	if byteLen <= 0 {
+		byteLen = 32
+	}
+	data := make([]byte, byteLen)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(data), nil
 }

@@ -32,15 +32,17 @@ type RouteInfo struct {
 
 // App is the main framework object.
 type App struct {
-	mu             sync.RWMutex
-	routes         []route
-	middlewares    []Middleware
-	maxBodyBytes   int64
-	cfg            fwconfig.Config
-	errorHandler   ErrorHandler
-	statusHandlers map[int]Handler
-	templateFuncs  template.FuncMap
-	templates      *template.Template
+	mu                 sync.RWMutex
+	routes             []route
+	middlewares        []Middleware
+	maxBodyBytes       int64
+	cfg                fwconfig.Config
+	errorHandler       ErrorHandler
+	statusHandlers     map[int]Handler
+	templateFuncs      template.FuncMap
+	templates          *template.Template
+	templatePatterns   []string
+	templateAutoReload bool
 }
 
 // Group scopes routes under a prefix and scoped middleware.

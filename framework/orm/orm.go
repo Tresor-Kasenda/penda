@@ -21,6 +21,7 @@ import (
 
 // Context key used to store a request-scoped ORM db session.
 const ContextKey = "orm.db"
+const migrationsTableName = "penda_schema_migrations"
 
 // DialectorOpener creates a gorm dialector from a DSN.
 type DialectorOpener func(dsn string) (gorm.Dialector, error)
@@ -36,6 +37,31 @@ type Config struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+}
+
+// Migration represents a versioned schema/data migration.
+type Migration struct {
+	Version string
+	Name    string
+	Up      func(tx *gorm.DB) error
+	Down    func(tx *gorm.DB) error
+}
+
+// AppliedMigration describes a migration row persisted in the schema migrations table.
+type AppliedMigration struct {
+	Version   string
+	Name      string
+	AppliedAt time.Time
+}
+
+type migrationRecord struct {
+	Version   string    `gorm:"primaryKey;size:191"`
+	Name      string    `gorm:"size:255;not null"`
+	AppliedAt time.Time `gorm:"not null"`
+}
+
+func (migrationRecord) TableName() string {
+	return migrationsTableName
 }
 
 var (
@@ -177,6 +203,114 @@ func AutoMigrate(db *gorm.DB, models ...any) error {
 	return db.AutoMigrate(models...)
 }
 
+// Migrate applies versioned migrations in ascending version order.
+func Migrate(db *gorm.DB, migrations ...Migration) error {
+	if db == nil {
+		return errors.New("db cannot be nil")
+	}
+	ordered, err := normalizeMigrations(migrations)
+	if err != nil {
+		return err
+	}
+	if err := ensureMigrationsTable(db); err != nil {
+		return err
+	}
+
+	applied, err := appliedMigrationMap(db)
+	if err != nil {
+		return err
+	}
+
+	for _, migration := range ordered {
+		if _, ok := applied[migration.Version]; ok {
+			continue
+		}
+
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := migration.Up(tx); err != nil {
+				return err
+			}
+			return tx.Table(migrationsTableName).Create(&migrationRecord{
+				Version:   migration.Version,
+				Name:      migration.Name,
+				AppliedAt: time.Now().UTC(),
+			}).Error
+		}); err != nil {
+			return fmt.Errorf("apply migration %s (%s): %w", migration.Version, migration.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// AppliedMigrations returns migrations stored in the schema migrations table.
+func AppliedMigrations(db *gorm.DB) ([]AppliedMigration, error) {
+	if db == nil {
+		return nil, errors.New("db cannot be nil")
+	}
+	if err := ensureMigrationsTable(db); err != nil {
+		return nil, err
+	}
+
+	var rows []migrationRecord
+	if err := db.Table(migrationsTableName).Order("version asc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]AppliedMigration, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, AppliedMigration{
+			Version:   row.Version,
+			Name:      row.Name,
+			AppliedAt: row.AppliedAt,
+		})
+	}
+	return out, nil
+}
+
+// RollbackLast rolls back the most recently applied migration (by version order)
+// using the provided migration registry.
+func RollbackLast(db *gorm.DB, migrations ...Migration) error {
+	if db == nil {
+		return errors.New("db cannot be nil")
+	}
+	ordered, err := normalizeMigrations(migrations)
+	if err != nil {
+		return err
+	}
+	if err := ensureMigrationsTable(db); err != nil {
+		return err
+	}
+
+	applied, err := AppliedMigrations(db)
+	if err != nil {
+		return err
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+	last := applied[len(applied)-1]
+
+	lookup := map[string]Migration{}
+	for _, migration := range ordered {
+		lookup[migration.Version] = migration
+	}
+	migration, ok := lookup[last.Version]
+	if !ok {
+		return fmt.Errorf("migration %q not found in registry", last.Version)
+	}
+	if migration.Down == nil {
+		return fmt.Errorf("migration %q has no down function", last.Version)
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := migration.Down(tx); err != nil {
+			return err
+		}
+		return tx.Table(migrationsTableName).Where("version = ?", last.Version).Delete(&migrationRecord{}).Error
+	})
+}
+
 // WithTransaction executes fn in a transaction.
 func WithTransaction(db *gorm.DB, fn func(tx *gorm.DB) error) error {
 	if db == nil {
@@ -186,6 +320,25 @@ func WithTransaction(db *gorm.DB, fn func(tx *gorm.DB) error) error {
 		return errors.New("transaction function cannot be nil")
 	}
 	return db.Transaction(fn)
+}
+
+// Ping verifies that the database connection is alive.
+func Ping(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("db cannot be nil")
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Ping()
+}
+
+// PingCheck returns a readiness/health check function compatible with observability.ReadinessHandler.
+func PingCheck(db *gorm.DB) func() error {
+	return func() error {
+		return Ping(db)
+	}
 }
 
 // Middleware injects request-scoped db session into framework context.
@@ -238,4 +391,51 @@ func openDialector(name, dsn string) (gorm.Dialector, error) {
 
 func normalizeName(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func ensureMigrationsTable(db *gorm.DB) error {
+	return db.AutoMigrate(&migrationRecord{})
+}
+
+func appliedMigrationMap(db *gorm.DB) (map[string]AppliedMigration, error) {
+	rows, err := AppliedMigrations(db)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]AppliedMigration, len(rows))
+	for _, row := range rows {
+		out[row.Version] = row
+	}
+	return out, nil
+}
+
+func normalizeMigrations(migrations []Migration) ([]Migration, error) {
+	ordered := make([]Migration, 0, len(migrations))
+	seen := map[string]struct{}{}
+	for _, migration := range migrations {
+		version := strings.TrimSpace(migration.Version)
+		name := strings.TrimSpace(migration.Name)
+		if version == "" {
+			return nil, errors.New("migration version cannot be empty")
+		}
+		if name == "" {
+			return nil, fmt.Errorf("migration %q name cannot be empty", version)
+		}
+		if migration.Up == nil {
+			return nil, fmt.Errorf("migration %q up function cannot be nil", version)
+		}
+		if _, exists := seen[version]; exists {
+			return nil, fmt.Errorf("duplicate migration version %q", version)
+		}
+		seen[version] = struct{}{}
+
+		migration.Version = version
+		migration.Name = name
+		ordered = append(ordered, migration)
+	}
+
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Version < ordered[j].Version
+	})
+	return ordered, nil
 }

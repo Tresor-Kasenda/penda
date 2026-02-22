@@ -152,23 +152,35 @@ Behavior:
 - `(*App).SetTemplateFuncs(funcs template.FuncMap)`
 - `(*App).SetTemplates(templates *template.Template)`
 - `(*App).LoadTemplates(patterns ...string) error`
+- `(*App).AppendTemplates(patterns ...string) error`
+- `(*App).SetTemplateAutoReload(enabled bool)`
+- `(*App).TemplateAutoReload() bool`
 
 Behavior:
 - `LoadTemplates` parses files matching one or more glob patterns
+- `AppendTemplates` merges additional templates into the current template set
 - template funcs registered via `SetTemplateFuncs` are applied when parsing
+- auto-reload reparses pattern-based templates on each render (dev use)
 - `Context.Render(...)` requires templates to be loaded or set
 
 ### Static Files
 
+- `type app.StaticConfig struct`
+  - `CacheControl`
+  - `NoCache`
+  - `EnableETag`
 - `(*App).Static(prefix, dir string)`
 - `(*App).StaticWith(prefix, dir string, middlewares ...Middleware)`
+- `(*App).StaticWithConfig(prefix, dir string, config StaticConfig, middlewares ...Middleware)`
 - `(*Group).Static(prefix, dir string)`
 - `(*Group).StaticWith(prefix, dir string, middlewares ...Middleware)`
+- `(*Group).StaticWithConfig(prefix, dir string, config StaticConfig, middlewares ...Middleware)`
 
 Behavior:
 - serves `GET` and `HEAD`
-- sets `Cache-Control: public, max-age=3600`
-- uses `http.FileServer` under the hood
+- sets `Cache-Control` (default `public, max-age=3600`)
+- emits `ETag` for regular files and supports `If-None-Match` (`304`)
+- guards against basic path traversal attempts
 
 ### Blueprints and Diagnostics
 
@@ -336,7 +348,9 @@ import "penda/framework/middleware"
   - sets `Retry-After`
 
 - `middleware.CSRF(config middleware.CSRFConfig)`
+  - issues CSRF token cookie on safe requests (and stores token in context local)
   - checks cookie token vs header/form token for unsafe methods
+  - can rotate token on unsafe requests (optional)
   - returns `403 Forbidden` on missing/invalid token
 
 ### Config Structs
@@ -363,12 +377,23 @@ import "penda/framework/middleware"
 
 - `CSRFConfig`
   - `CookieName`
+  - `CookiePath`
+  - `CookieDomain`
+  - `CookieSecure`
+  - `CookieHTTPOnly`
+  - `CookieSameSite`
+  - `CookieMaxAge`
   - `HeaderName`
   - `FormField`
+  - `ContextKey`
+  - `TokenBytes`
+  - `RotateOnUnsafe`
+
+- `middleware.CSRFToken(c *fwctx.Context) string`
 
 Important limitations:
 - `RateLimit` is process-local/in-memory (not distributed)
-- `CSRF` validates tokens but does not generate/store them
+- CSRF tokens are cookie-based (no server-side token store)
 
 ## 6. Package `framework/config`
 
@@ -582,7 +607,21 @@ Use this to support other SQL databases (custom GORM dialector).
 - `orm.OpenFromFrameworkConfig(cfg config.Config) (*gorm.DB, error)`
 - `orm.Open(cfg orm.Config) (*gorm.DB, error)`
 - `orm.AutoMigrate(db *gorm.DB, models ...any) error`
+- `type orm.Migration struct`
+  - `Version`
+  - `Name`
+  - `Up func(tx *gorm.DB) error`
+  - `Down func(tx *gorm.DB) error`
+- `type orm.AppliedMigration struct`
+  - `Version`
+  - `Name`
+  - `AppliedAt`
+- `orm.Migrate(db *gorm.DB, migrations ...orm.Migration) error`
+- `orm.AppliedMigrations(db *gorm.DB) ([]orm.AppliedMigration, error)`
+- `orm.RollbackLast(db *gorm.DB, migrations ...orm.Migration) error`
 - `orm.WithTransaction(db *gorm.DB, fn func(tx *gorm.DB) error) error`
+- `orm.Ping(db *gorm.DB) error`
+- `orm.PingCheck(db *gorm.DB) func() error`
 
 ### Request-Scoped DB Injection
 
@@ -593,7 +632,58 @@ Use this to support other SQL databases (custom GORM dialector).
 
 See `docs/orm.md` for examples and configuration patterns.
 
-## 11. CLI (`cmd/penda` + `internal/cli`)
+Migration notes:
+- version ordering is lexical (`"001"`, `"002"`, ...)
+- applied migrations are stored in `penda_schema_migrations`
+
+## 11. Package `framework/session`
+
+Import:
+
+```go
+import "penda/framework/session"
+```
+
+This package provides signed cookie-backed sessions (HMAC-SHA256).
+
+### Types
+
+- `const session.ContextKey = "session"`
+- `type session.Config struct`
+  - `CookieName`
+  - `Path`
+  - `Domain`
+  - `Secure`
+  - `HTTPOnly`
+  - `SameSite`
+  - `MaxAge`
+- `type session.Store struct`
+- `type session.Session struct`
+
+### API
+
+- `session.NewStore(secret []byte, config session.Config) (*session.Store, error)`
+- `session.MustNewStore(secret []byte, config session.Config) *session.Store`
+- `session.Middleware(store *session.Store) app.Middleware`
+- `(*Store).Load(c *fwctx.Context) (*Session, error)`
+- `session.FromContext(c *fwctx.Context) (*session.Session, bool)`
+- `session.MustFromContext(c *fwctx.Context) *session.Session`
+
+Session methods:
+- `(*Session).Get(key string) (string, bool)`
+- `(*Session).Set(key, value string)`
+- `(*Session).Delete(key string)`
+- `(*Session).Clear()`
+- `(*Session).Values() map[string]string`
+- `(*Session).Save(c *fwctx.Context) error`
+- `(*Session).Destroy(c *fwctx.Context)`
+
+Behavior notes:
+- sessions are signed (integrity protected) but not encrypted
+- the current implementation uses explicit `Save(...)` for reliable cookie persistence
+- tampered cookies are rejected (`400 Bad Request` via middleware)
+
+## 12. CLI (`cmd/penda` + `internal/cli`)
 
 CLI command entrypoint:
 - `cmd/penda/main.go`
@@ -625,7 +715,7 @@ Built-in demo app includes:
 - `GET /api/health` (blueprint)
 - `POST /api/echo`
 
-## 12. End-to-End Example (Feature Composition)
+## 13. End-to-End Example (Feature Composition)
 
 ```go
 package main
@@ -669,11 +759,11 @@ func main() {
 }
 ```
 
-## 13. Current Limitations (Documented)
+## 14. Current Limitations (Documented)
 
-- Template auto-reload is not implemented yet
-- Config file loading currently supports JSON only
 - Rate limiting is in-memory (single process)
-- CSRF middleware validates tokens but does not generate/manage them
+- CSRF/session mechanisms are cookie-based only (no distributed store)
+- Session cookies are signed but not encrypted
 - ORM integration targets SQL databases through GORM dialectors
+- Versioned migrations are code-function based (no file-based migration CLI yet)
 - No OpenTelemetry tracing integration yet

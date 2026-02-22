@@ -116,13 +116,24 @@ Observability (`framework/observability`):
 Security middleware (`framework/middleware`):
 - `SecurityHeaders`
 - `RateLimit`
-- `CSRF`
+- `CSRF` (token generation + validation + optional rotation)
+
+## Lot 3 Extensions (Post-Phase Hardening)
+
+Implemented:
+- template auto-reload in dev (`app.SetTemplateAutoReload(true)`)
+- static ETag / conditional GET support (`304 Not Modified`)
+- configurable static serving options (`app.StaticWithConfig`, `app.Group(...).StaticWithConfig`)
+- signed cookie sessions in `framework/session`
+- versioned ORM migrations (`orm.Migrate`, `orm.AppliedMigrations`, `orm.RollbackLast`)
+- DB readiness/health checks via `orm.Ping` / `orm.PingCheck` (for `observability.ReadinessHandler`)
 
 ## What is still partial
 
-- template auto-reload in dev mode is not implemented yet
 - no OpenTelemetry tracing integration yet
 - rate limiting is in-memory only (single process)
+- CSRF/session storage is cookie-based only (no Redis/distributed store yet)
+- migrations are code-based functions (no SQL file loader/CLI migration generator yet)
 
 ## ORM Integration (Extension Implemented)
 

@@ -12,12 +12,14 @@ Current implementation covers:
 - Request parsing/binding (JSON, form, multipart)
 - Centralized error handling (`OnError`, `OnStatus`, typed HTTP errors)
 - Templates and static file serving
+- Dev UX helpers (template auto-reload, static ETag/304)
 - Config loading (defaults, profiles, JSON/YAML/TOML files, env precedence)
 - Blueprints/modules (including local templates/static mounts)
 - CLI commands (`new`, `run`, `routes`, `doctor`)
 - Testing toolkit (`framework/testing`, JSON/cookies/multipart helpers)
+- Signed sessions (`framework/session`)
 - Observability (`/metrics`, health/readiness helpers)
-- ORM integration (GORM-based, multi-SGBD, custom dialector registry)
+- ORM integration (GORM-based, multi-SGBD, custom dialector registry, versioned migrations, DB ping checks)
 
 ## Recommended Reading Order
 

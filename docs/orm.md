@@ -81,6 +81,36 @@ if err := orm.AutoMigrate(db, &User{}); err != nil {
 }
 ```
 
+## Versioned Migrations (Recommended for Real Apps)
+
+In addition to `AutoMigrate`, the ORM package now provides a simple versioned migration runner.
+
+```go
+migrations := []orm.Migration{
+    {
+        Version: "001_create_users",
+        Name:    "create users table",
+        Up: func(tx *gorm.DB) error {
+            return tx.AutoMigrate(&User{})
+        },
+        Down: func(tx *gorm.DB) error {
+            return tx.Migrator().DropTable(&User{})
+        },
+    },
+}
+
+if err := orm.Migrate(db, migrations...); err != nil {
+    panic(err)
+}
+```
+
+Available helpers:
+- `orm.Migrate(...)`
+- `orm.AppliedMigrations(db)`
+- `orm.RollbackLast(db, migrations...)`
+
+Migration metadata is stored in the `penda_schema_migrations` table.
+
 ## Inject DB into Request Context (Middleware)
 
 Use the ORM middleware to inject a request-scoped GORM session:
@@ -123,6 +153,18 @@ err := orm.WithTransaction(db, func(tx *gorm.DB) error {
     return nil
 })
 ```
+
+## DB Health / Readiness Checks
+
+Use the ORM ping helpers with observability:
+
+```go
+server.Get("/ready", observability.ReadinessHandler(orm.PingCheck(db)))
+```
+
+Helpers:
+- `orm.Ping(db)`
+- `orm.PingCheck(db)`
 
 ## Support Any Database (Custom Dialector)
 

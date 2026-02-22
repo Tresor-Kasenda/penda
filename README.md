@@ -17,11 +17,13 @@ Implemented foundations:
 - Header/cookie helpers
 - Centralized error handling (`OnError`, `OnStatus`, `HTTPError`)
 - Templates and static serving (`LoadTemplates`, `Render`, `Static`)
+- Dev helpers: template auto-reload + static ETag/304 support
 - Config package (`framework/config`) with profiles + JSON/YAML/TOML file/env resolution
 - ORM integration (`framework/orm`) with GORM + custom dialector registry
 - Blueprints/modules (`framework/blueprint`) with local templates/static mounts
 - CLI commands (`penda new`, `penda run`, `penda routes`, `penda doctor`)
 - Testing toolkit (`framework/testing`) with JSON/cookie assertions and multipart helpers
+- Signed sessions (`framework/session`) with cookie-backed session middleware
 - Observability package (`/metrics`, health/readiness handlers)
 
 ## Quickstart
