@@ -18,7 +18,7 @@ Current implementation covers:
 - CLI commands (`new`, `run`, `routes`, `doctor`)
 - Testing toolkit (`framework/testing`, JSON/cookies/multipart helpers)
 - Signed sessions (`framework/session`)
-- Observability (`/metrics`, health/readiness helpers)
+- Observability (`/metrics`, health/readiness helpers, OpenTelemetry tracing middleware)
 - ORM integration (GORM-based, multi-SGBD, custom dialector registry, versioned migrations, DB ping checks)
 
 ## Recommended Reading Order

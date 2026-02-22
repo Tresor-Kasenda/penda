@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	fwapp "penda/framework/app"
 	fwctx "penda/framework/context"
 )
@@ -48,6 +50,15 @@ type RateLimitConfig struct {
 	KeyFunc  func(*fwctx.Context) string
 }
 
+// RedisRateLimitConfig configures Redis-backed distributed rate limiting.
+type RedisRateLimitConfig struct {
+	Requests  int
+	Window    time.Duration
+	KeyFunc   func(*fwctx.Context) string
+	KeyPrefix string
+	FailOpen  bool
+}
+
 // CSRFConfig configures CSRF token validation.
 type CSRFConfig struct {
 	CookieName     string
@@ -65,6 +76,28 @@ type CSRFConfig struct {
 }
 
 const defaultCSRFContextKey = "csrf_token"
+
+const redisRateLimitScript = `
+local key = KEYS[1]
+local limit = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+
+local current = redis.call("INCR", key)
+if current == 1 then
+  redis.call("PEXPIRE", key, window_ms)
+end
+
+local ttl = redis.call("PTTL", key)
+if ttl < 0 then
+  ttl = window_ms
+end
+
+if current > limit then
+  return {0, current, ttl}
+end
+
+return {1, current, ttl}
+`
 
 // Recovery catches panics and turns them into a 500 error.
 func Recovery() fwapp.Middleware {
@@ -255,6 +288,66 @@ func RateLimit(config RateLimitConfig) fwapp.Middleware {
 	}
 }
 
+// RedisRateLimit applies a Redis-backed fixed-window limiter suitable for multi-instance deployments.
+func RedisRateLimit(client redis.UniversalClient, config RedisRateLimitConfig) fwapp.Middleware {
+	if client == nil {
+		panic("redis client cannot be nil")
+	}
+	normalized := normalizeRedisRateLimitConfig(config)
+
+	return func(next fwapp.Handler) fwapp.Handler {
+		return func(c *fwctx.Context) error {
+			key := normalized.KeyFunc(c)
+			if strings.TrimSpace(key) == "" {
+				key = "global"
+			}
+			redisKey := normalized.KeyPrefix + key
+
+			res, err := client.Eval(
+				c.Request.Context(),
+				redisRateLimitScript,
+				[]string{redisKey},
+				normalized.Requests,
+				normalized.Window.Milliseconds(),
+			).Result()
+			if err != nil {
+				if normalized.FailOpen {
+					return next(c)
+				}
+				return fwctx.NewHTTPError(http.StatusServiceUnavailable, "rate limiter unavailable", err)
+			}
+
+			allowed, currentCount, ttlMillis, err := parseRedisRateLimitResult(res)
+			if err != nil {
+				if normalized.FailOpen {
+					return next(c)
+				}
+				return fwctx.NewHTTPError(http.StatusServiceUnavailable, "rate limiter unavailable", err)
+			}
+
+			remaining := normalized.Requests - currentCount
+			if remaining < 0 {
+				remaining = 0
+			}
+
+			c.SetHeader("X-RateLimit-Limit", strconv.Itoa(normalized.Requests))
+			c.SetHeader("X-RateLimit-Remaining", strconv.Itoa(remaining))
+			c.SetHeader("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Duration(ttlMillis)*time.Millisecond).Unix(), 10))
+
+			if !allowed {
+				retryAfter := int((ttlMillis + 999) / 1000)
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				c.SetHeader("Retry-After", strconv.Itoa(retryAfter))
+				return fwctx.NewHTTPError(http.StatusTooManyRequests, "rate limit exceeded", nil)
+			}
+
+			return next(c)
+		}
+	}
+}
+
 // CSRF verifies that unsafe methods have matching cookie and token values.
 func CSRF(config CSRFConfig) fwapp.Middleware {
 	normalized := normalizeCSRFConfig(config)
@@ -368,6 +461,23 @@ func normalizeRateLimitConfig(config RateLimitConfig) RateLimitConfig {
 	return config
 }
 
+func normalizeRedisRateLimitConfig(config RedisRateLimitConfig) RedisRateLimitConfig {
+	if config.Requests <= 0 {
+		config.Requests = 60
+	}
+	if config.Window <= 0 {
+		config.Window = time.Minute
+	}
+	if config.KeyFunc == nil {
+		base := normalizeRateLimitConfig(RateLimitConfig{}).KeyFunc
+		config.KeyFunc = base
+	}
+	if strings.TrimSpace(config.KeyPrefix) == "" {
+		config.KeyPrefix = "penda:ratelimit:"
+	}
+	return config
+}
+
 func normalizeCSRFConfig(config CSRFConfig) CSRFConfig {
 	if strings.TrimSpace(config.CookieName) == "" {
 		config.CookieName = "csrf_token"
@@ -436,4 +546,43 @@ func generateToken(byteLen int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(data), nil
+}
+
+func parseRedisRateLimitResult(raw any) (allowed bool, currentCount int, ttlMillis int64, err error) {
+	values, ok := raw.([]any)
+	if !ok || len(values) != 3 {
+		return false, 0, 0, fmt.Errorf("unexpected redis rate limit result %T", raw)
+	}
+
+	allowedInt, err := anyToInt64(values[0])
+	if err != nil {
+		return false, 0, 0, err
+	}
+	countInt, err := anyToInt64(values[1])
+	if err != nil {
+		return false, 0, 0, err
+	}
+	ttlInt, err := anyToInt64(values[2])
+	if err != nil {
+		return false, 0, 0, err
+	}
+
+	return allowedInt == 1, int(countInt), ttlInt, nil
+}
+
+func anyToInt64(value any) (int64, error) {
+	switch v := value.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case uint64:
+		return int64(v), nil
+	case string:
+		return strconv.ParseInt(v, 10, 64)
+	case []byte:
+		return strconv.ParseInt(string(v), 10, 64)
+	default:
+		return 0, fmt.Errorf("unsupported numeric type %T", value)
+	}
 }

@@ -128,11 +128,19 @@ Implemented:
 - versioned ORM migrations (`orm.Migrate`, `orm.AppliedMigrations`, `orm.RollbackLast`)
 - DB readiness/health checks via `orm.Ping` / `orm.PingCheck` (for `observability.ReadinessHandler`)
 
+## Lot 4 Extensions (Distributed / Tracing)
+
+Implemented:
+- OpenTelemetry tracing middleware in `framework/observability` (`observability.Tracing(...)`)
+- OTLP/HTTP tracer provider helper (`observability.NewOTLPHTTPTracerProvider(...)`)
+- Redis-backed distributed rate limiting (`middleware.RedisRateLimit(...)`)
+- Redis-backed pluggable sessions (`session.NewRedisStore(...)`, `session.RedisMiddleware(...)`)
+
 ## What is still partial
 
-- no OpenTelemetry tracing integration yet
-- rate limiting is in-memory only (single process)
-- CSRF/session storage is cookie-based only (no Redis/distributed store yet)
+- no built-in trace exporter lifecycle wiring in CLI/examples yet (helper is available)
+- in-memory `RateLimit` still exists; use `RedisRateLimit` for distributed deployments
+- cookie sessions still default to local signed-cookie storage; Redis store is optional
 - migrations are code-based functions (no SQL file loader/CLI migration generator yet)
 
 ## ORM Integration (Extension Implemented)

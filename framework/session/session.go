@@ -34,12 +34,22 @@ type Store struct {
 	config Config
 }
 
+type sessionLoader interface {
+	Load(c *fwctx.Context) (*Session, error)
+}
+
+type sessionPersistor interface {
+	saveSession(c *fwctx.Context, s *Session) error
+	destroySession(c *fwctx.Context, s *Session)
+}
+
 // Session is a mutable request-scoped map persisted into a signed cookie.
 // Values are string-based for predictable JSON serialization across requests.
 type Session struct {
-	store   *Store
-	values  map[string]string
-	destroy bool
+	persistor sessionPersistor
+	id        string
+	values    map[string]string
+	destroy   bool
 }
 
 // NewStore creates a signed cookie session store.
@@ -65,13 +75,17 @@ func MustNewStore(secret []byte, config Config) *Store {
 
 // Middleware loads a session from the request cookie and stores it in framework context.
 func Middleware(store *Store) fwapp.Middleware {
-	if store == nil {
-		panic("session store cannot be nil")
-	}
+	return MiddlewareLoader(store)
+}
 
+// MiddlewareLoader loads a session using any compatible loader and stores it in framework context.
+func MiddlewareLoader(loader sessionLoader) fwapp.Middleware {
+	if loader == nil {
+		panic("session loader cannot be nil")
+	}
 	return func(next fwapp.Handler) fwapp.Handler {
 		return func(c *fwctx.Context) error {
-			sess, err := store.Load(c)
+			sess, err := loader.Load(c)
 			if err != nil {
 				return fwctx.NewHTTPError(http.StatusBadRequest, "invalid session cookie", err)
 			}
@@ -101,8 +115,8 @@ func (s *Store) Load(c *fwctx.Context) (*Session, error) {
 	}
 
 	return &Session{
-		store:  s,
-		values: values,
+		persistor: s,
+		values:    values,
 	}, nil
 }
 
@@ -184,8 +198,8 @@ func (s *Session) Destroy(c *fwctx.Context) {
 	}
 	s.destroy = true
 	s.values = map[string]string{}
-	if c != nil {
-		s.writeCookie(c, "", -1)
+	if c != nil && s.persistor != nil {
+		s.persistor.destroySession(c, s)
 	}
 }
 
@@ -197,24 +211,14 @@ func (s *Session) Save(c *fwctx.Context) error {
 	if c == nil {
 		return errors.New("context cannot be nil")
 	}
-	if s.store == nil {
-		return errors.New("session store is not configured")
+	if s.persistor == nil {
+		return errors.New("session persistor is not configured")
 	}
-	if s.destroy {
-		s.writeCookie(c, "", -1)
-		return nil
-	}
-
-	value, err := s.store.encode(s.values)
-	if err != nil {
-		return err
-	}
-	s.writeCookie(c, value, s.store.config.MaxAge)
-	return nil
+	return s.persistor.saveSession(c, s)
 }
 
-func (s *Session) writeCookie(c *fwctx.Context, value string, maxAge int) {
-	cfg := s.store.config
+func (s *Store) writeCookie(c *fwctx.Context, value string, maxAge int) {
+	cfg := s.config
 	c.SetCookie(&http.Cookie{
 		Name:     cfg.CookieName,
 		Value:    value,
@@ -225,6 +229,33 @@ func (s *Session) writeCookie(c *fwctx.Context, value string, maxAge int) {
 		SameSite: cfg.SameSite,
 		MaxAge:   maxAge,
 	})
+}
+
+func (s *Store) saveSession(c *fwctx.Context, sess *Session) error {
+	if c == nil {
+		return errors.New("context cannot be nil")
+	}
+	if sess == nil {
+		return errors.New("session cannot be nil")
+	}
+	if sess.destroy {
+		s.writeCookie(c, "", -1)
+		return nil
+	}
+
+	value, err := s.encode(sess.values)
+	if err != nil {
+		return err
+	}
+	s.writeCookie(c, value, s.config.MaxAge)
+	return nil
+}
+
+func (s *Store) destroySession(c *fwctx.Context, _ *Session) {
+	if c == nil {
+		return
+	}
+	s.writeCookie(c, "", -1)
 }
 
 func (s *Store) encode(values map[string]string) (string, error) {

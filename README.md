@@ -24,6 +24,8 @@ Implemented foundations:
 - CLI commands (`penda new`, `penda run`, `penda routes`, `penda doctor`)
 - Testing toolkit (`framework/testing`) with JSON/cookie assertions and multipart helpers
 - Signed sessions (`framework/session`) with cookie-backed session middleware
+- Redis-backed distributed options: rate limiting + sessions
+- OpenTelemetry tracing middleware (`framework/observability`)
 - Observability package (`/metrics`, health/readiness handlers)
 
 ## Quickstart

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	fwapp "penda/framework/app"
 	fwctx "penda/framework/context"
 )
@@ -169,6 +172,48 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 	if rr2.Header().Get("Retry-After") == "" {
 		t.Fatal("expected Retry-After header")
+	}
+}
+
+func TestRedisRateLimitMiddleware(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	server := fwapp.New()
+	server.Use(RedisRateLimit(client, RedisRateLimitConfig{
+		Requests: 1,
+		Window:   time.Minute,
+		KeyFunc: func(c *fwctx.Context) string {
+			return "test-key"
+		},
+		KeyPrefix: "test:rl:",
+	}))
+	server.Get("/limited", func(c *fwctx.Context) error {
+		return c.Text(http.StatusOK, "ok")
+	})
+
+	req1 := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	rr1 := httptest.NewRecorder()
+	server.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr1.Code)
+	}
+	if rr1.Header().Get("X-RateLimit-Limit") != "1" {
+		t.Fatalf("expected X-RateLimit-Limit=1, got %q", rr1.Header().Get("X-RateLimit-Limit"))
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	rr2 := httptest.NewRecorder()
+	server.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, rr2.Code)
+	}
+	if rr2.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header")
+	}
+	if rr2.Header().Get("X-RateLimit-Remaining") != "0" {
+		t.Fatalf("expected X-RateLimit-Remaining=0, got %q", rr2.Header().Get("X-RateLimit-Remaining"))
 	}
 }
 

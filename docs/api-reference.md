@@ -347,6 +347,11 @@ import "penda/framework/middleware"
   - returns `429 Too Many Requests`
   - sets `Retry-After`
 
+- `middleware.RedisRateLimit(client redis.UniversalClient, config middleware.RedisRateLimitConfig)`
+  - Redis-backed fixed-window limiter (multi-instance friendly)
+  - returns `429 Too Many Requests`
+  - sets `Retry-After`, `X-RateLimit-*`
+
 - `middleware.CSRF(config middleware.CSRFConfig)`
   - issues CSRF token cookie on safe requests (and stores token in context local)
   - checks cookie token vs header/form token for unsafe methods
@@ -375,6 +380,13 @@ import "penda/framework/middleware"
   - `Window time.Duration`
   - `KeyFunc func(*fwctx.Context) string`
 
+- `RedisRateLimitConfig`
+  - `Requests`
+  - `Window time.Duration`
+  - `KeyFunc func(*fwctx.Context) string`
+  - `KeyPrefix`
+  - `FailOpen`
+
 - `CSRFConfig`
   - `CookieName`
   - `CookiePath`
@@ -392,7 +404,7 @@ import "penda/framework/middleware"
 - `middleware.CSRFToken(c *fwctx.Context) string`
 
 Important limitations:
-- `RateLimit` is process-local/in-memory (not distributed)
+- `RateLimit` is process-local/in-memory (use `RedisRateLimit` for distributed deployments)
 - CSRF tokens are cookie-based (no server-side token store)
 
 ## 6. Package `framework/config`
@@ -518,6 +530,29 @@ Exposed metric names include:
 
 Behavior:
 - readiness returns `503 Service Unavailable` when `check()` fails
+
+### OpenTelemetry Tracing
+
+- `type observability.TracingConfig struct`
+  - `TracerProvider`
+  - `Propagator`
+  - `TracerName`
+  - `SpanNameFunc`
+- `observability.Tracing(config observability.TracingConfig) app.Middleware`
+
+- `type observability.OTLPHTTPTracerProviderConfig struct`
+  - `Endpoint`
+  - `Insecure`
+  - `Headers`
+  - `ServiceName`
+  - `ServiceVersion`
+  - `Environment`
+  - `Sampler`
+- `observability.NewOTLPHTTPTracerProvider(ctx context.Context, config observability.OTLPHTTPTracerProviderConfig) (*sdktrace.TracerProvider, error)`
+
+Behavior notes:
+- extracts parent context from incoming headers (`traceparent`, etc.) using configured propagator
+- creates a server span per request and records status code / request attributes
 
 ## 9. Package `framework/testing`
 
@@ -658,6 +693,11 @@ This package provides signed cookie-backed sessions (HMAC-SHA256).
   - `SameSite`
   - `MaxAge`
 - `type session.Store struct`
+- `type session.RedisStoreConfig struct`
+  - `KeyPrefix`
+  - `TTL`
+  - `TouchOnLoad`
+- `type session.RedisStore struct`
 - `type session.Session struct`
 
 ### API
@@ -665,7 +705,12 @@ This package provides signed cookie-backed sessions (HMAC-SHA256).
 - `session.NewStore(secret []byte, config session.Config) (*session.Store, error)`
 - `session.MustNewStore(secret []byte, config session.Config) *session.Store`
 - `session.Middleware(store *session.Store) app.Middleware`
+- `session.RedisMiddleware(store *session.RedisStore) app.Middleware`
 - `(*Store).Load(c *fwctx.Context) (*Session, error)`
+- `session.NewRedisStore(client redis.UniversalClient, secret []byte, cookieConfig session.Config, redisConfig session.RedisStoreConfig) (*session.RedisStore, error)`
+- `session.MustNewRedisStore(client redis.UniversalClient, secret []byte, cookieConfig session.Config, redisConfig session.RedisStoreConfig) *session.RedisStore`
+- `(*RedisStore).Load(c *fwctx.Context) (*Session, error)`
+- `(*RedisStore).Ping(ctx context.Context) error`
 - `session.FromContext(c *fwctx.Context) (*session.Session, bool)`
 - `session.MustFromContext(c *fwctx.Context) *session.Session`
 
@@ -682,6 +727,7 @@ Behavior notes:
 - sessions are signed (integrity protected) but not encrypted
 - the current implementation uses explicit `Save(...)` for reliable cookie persistence
 - tampered cookies are rejected (`400 Bad Request` via middleware)
+- `RedisStore` keeps values in Redis and stores a signed session ID in the cookie
 
 ## 12. CLI (`cmd/penda` + `internal/cli`)
 
@@ -761,9 +807,9 @@ func main() {
 
 ## 14. Current Limitations (Documented)
 
-- Rate limiting is in-memory (single process)
-- CSRF/session mechanisms are cookie-based only (no distributed store)
+- In-memory `RateLimit` is process-local (use `RedisRateLimit` for distributed deployments)
+- CSRF tokens are cookie-based (no server-side token store)
 - Session cookies are signed but not encrypted
 - ORM integration targets SQL databases through GORM dialectors
 - Versioned migrations are code-function based (no file-based migration CLI yet)
-- No OpenTelemetry tracing integration yet
+- No built-in OpenTelemetry wiring in CLI/examples yet (middleware + OTLP helper are available)
