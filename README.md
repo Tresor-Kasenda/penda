@@ -1,5 +1,7 @@
 # penda
 
+![Penda logo proposal](docs/assets/penda-logo-proposal.svg)
+
 `penda` is a learning-oriented micro-framework in Go, inspired by Flask.
 
 ## Current state

@@ -39,7 +39,7 @@ go mod init myapi
 Option A (when this framework is published on a Git host):
 
 ```bash
-go get github.com/<your-org>/penda@latest
+go get github.com/Tresor-Kasenda/penda
 ```
 
 Option B (current local development setup):

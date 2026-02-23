@@ -1,0 +1,38 @@
+<svg width="960" height="280" viewBox="0 0 960 280" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Penda logo proposal</title>
+  <desc id="desc">A route-inspired P monogram with node endpoints and the word penda.</desc>
+  <defs>
+    <style>
+      .ink { stroke: #0F172A; }
+      .teal { stroke: #0EA5A4; }
+      .node { fill: #0F172A; }
+      .node-teal { fill: #0EA5A4; }
+      .node-lime { fill: #84CC16; }
+      .word { fill: #0F172A; font: 700 108px "Sora", "Avenir Next", "IBM Plex Sans", sans-serif; letter-spacing: -2px; }
+      .tag { fill: #334155; font: 500 24px "IBM Plex Sans", "Inter", sans-serif; letter-spacing: 1.4px; text-transform: uppercase; }
+    </style>
+  </defs>
+
+  <g transform="translate(24 20)">
+    <!-- Monogram: a technical, route-like P with branching path -->
+    <g stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+      <path class="teal" d="M72 220V40" />
+      <path class="teal" d="M72 40H154C193 40 224 71 224 110C224 149 193 180 154 180H72" />
+      <path class="ink" d="M72 144H154" />
+      <path class="ink" d="M72 158L194 232" />
+    </g>
+
+    <g>
+      <circle class="node-teal" cx="72" cy="40" r="9" />
+      <circle class="node-teal" cx="154" cy="40" r="9" />
+      <circle class="node-teal" cx="224" cy="110" r="9" />
+      <circle class="node" cx="154" cy="144" r="9" />
+      <circle class="node-lime" cx="194" cy="232" r="12" />
+    </g>
+
+    <g transform="translate(286 0)">
+      <text class="word" x="0" y="164">penda</text>
+      <text class="tag" x="2" y="212">Go micro-framework</text>
+    </g>
+  </g>
+</svg>
